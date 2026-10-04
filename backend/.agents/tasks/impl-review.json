@@ -1,0 +1,27 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": "score-breakdown-divergence",
+      "severity": "MEDIUM",
+      "label": "Score breakdown diverges from sort order",
+      "description": "getPrioritizedTasks recomputes score_breakdown live on stored rows using a time-sensitive urgency function. The breakdown total drifts from the stored priority_score that drives sort order, so the per-task breakdown contradicts the ranking returned in the same response.",
+      "action": "Recompute priority_score live in getPrioritizedTasks and sort on the recomputed value so breakdown and sort key are always derived from the same calculation."
+    },
+    {
+      "id": "archived-dependency-blocks-optimizer",
+      "severity": "MEDIUM",
+      "label": "Archived tasks block optimizer recommendations",
+      "description": "optimizeSession checks depTask.status !== 'done' to gate recommendations. Archived dependencies (status='archived') satisfy this check, permanently suppressing dependent tasks from every session recommendation with no diagnostic to the caller.",
+      "action": "Treat both 'done' and 'archived' as satisfying the dependency gate: !['done', 'archived'].includes(depTask.status)."
+    },
+    {
+      "id": "no-status-validation-on-create",
+      "severity": "LOW",
+      "label": "No status validation on task creation",
+      "description": "createTask accepts any string as the status field. A task created with status='archived' or an arbitrary value silently bypasses listTasks filters and corrupts optimizer logic. The schema has no CHECK constraint on status values.",
+      "action": "Whitelist ['pending', 'in_progress', 'done'] as valid creation statuses and return 400 for any other value."
+    }
+  ],
+  "reviewDoc": "e:\\LifeQueue\\backend\\.agents\\tasks\\2026-10-04-121553-review.md"
+}

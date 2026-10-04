@@ -1,6 +1,10 @@
 const { getDb } = require('../database/db');
 const { success, error } = require('../utils/response');
-const { calculatePriorityScore, getScoreBreakdown } = require('../services/priorityService');
+const {
+  calculatePriority,
+  calculatePriorityScore,
+  getScoreBreakdown,
+} = require('../services/priorityEngine');
 
 /**
  * GET /api/tasks
@@ -53,6 +57,8 @@ async function createTask(req, res) {
     } = req.body;
 
     // Validation
+    const VALID_STATUSES = ['pending', 'in_progress', 'done'];
+
     if (!title || typeof title !== 'string' || title.trim() === '') {
       return error(res, 'title is required', 400);
     }
@@ -69,6 +75,11 @@ async function createTask(req, res) {
       }
     }
 
+    const { status: reqStatus } = req.body;
+    if (reqStatus !== undefined && !VALID_STATUSES.includes(reqStatus)) {
+      return error(res, `status must be one of: ${VALID_STATUSES.join(', ')}`, 400);
+    }
+
     const taskData = {
       title: title.trim(),
       description: description || null,
@@ -78,13 +89,14 @@ async function createTask(req, res) {
       impact: impact ? Number(impact) : 5,
       consequence: consequence || null,
       user_id: user_id || null,
+      status: reqStatus || 'pending',
     };
 
     taskData.priority_score = calculatePriorityScore(taskData);
 
     const result = await db.run(
       `INSERT INTO tasks (user_id, title, description, category, deadline, estimated_minutes, impact, consequence, status, priority_score)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         taskData.user_id,
         taskData.title,
@@ -94,6 +106,7 @@ async function createTask(req, res) {
         taskData.estimated_minutes,
         taskData.impact,
         taskData.consequence,
+        taskData.status,
         taskData.priority_score,
       ]
     );
@@ -264,7 +277,9 @@ async function completeTask(req, res) {
 
 /**
  * GET /api/tasks/prioritized
- * Same filters as listTasks, but includes rank and score_breakdown
+ * Returns tasks ranked by a live-recomputed priority score so that
+ * rank, score, and the explanation are always in sync —
+ * even as deadlines approach and urgency changes since the task was stored.
  */
 async function getPrioritizedTasks(req, res) {
   try {
@@ -288,18 +303,49 @@ async function getPrioritizedTasks(req, res) {
     }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const tasks = await db.all(
-      `SELECT * FROM tasks ${where} ORDER BY priority_score DESC`,
-      params
-    );
+    let tasks = await db.all(`SELECT * FROM tasks ${where}`, params);
 
-    const ranked = tasks.map((task, index) => ({
-      ...task,
-      rank: index + 1,
-      score_breakdown: getScoreBreakdown(task),
+    // Fetch dependencies to build _depIds for each task
+    const allDeps = await db.all('SELECT task_id, depends_on_task_id FROM dependencies');
+    const depsMap = {};
+    for (const dep of allDeps) {
+      if (!depsMap[dep.task_id]) depsMap[dep.task_id] = [];
+      depsMap[dep.task_id].push(dep.depends_on_task_id);
+    }
+    // Attach dependency info to each task
+    tasks = tasks.map(t => ({
+      ...t,
+      _depIds: depsMap[t.id] || []
     }));
 
-    return success(res, ranked);
+    // Calculate priority with full breakdown and explanation for each task
+    const withPriority = tasks.map(task => {
+      const result = calculatePriority(task, tasks);
+      return {
+        ...task,
+        priority_score: result.score,
+        urgency: result.urgency,
+        impact: result.impact,
+        effort_efficiency: result.effortEfficiency,
+        dependency_impact: result.dependencyImpact,
+        consequence: result.consequence,
+        explanation: result.explanation,
+      };
+    });
+
+    // Sort by score descending
+    withPriority.sort((a, b) => b.priority_score - a.priority_score);
+
+    // Add rank
+    const ranked = withPriority.map((task, index) => ({
+      ...task,
+      rank: index + 1,
+    }));
+
+    // Remove internal _depIds before returning
+    const clean = ranked.map(({ _depIds, ...t }) => t);
+
+    return success(res, clean);
   } catch (err) {
     console.error('[taskController.getPrioritizedTasks]', err);
     return error(res, 'Failed to fetch prioritized tasks', 500, err.message);

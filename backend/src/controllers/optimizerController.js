@@ -60,10 +60,10 @@ async function optimizeSession(req, res) {
     for (const task of tasks) {
       const depIds = depsMap[task.id] || [];
 
-      // Check if all dependencies are done
+      // Check if all dependencies are satisfied (done or archived)
       const hasIncompleteDep = depIds.some((depId) => {
         const depTask = allTaskLookup[depId];
-        return !depTask || depTask.status !== 'done';
+        return !depTask || !['done', 'archived'].includes(depTask.status);
       });
 
       if (hasIncompleteDep) continue;
