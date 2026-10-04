@@ -510,116 +510,40 @@ The interface is designed for:
 
 ---
 
-## Installation
-
-### Prerequisites
-
-Make sure the following are installed:
-
-```text
-Node.js
-npm
-Git
-```
-
-### Clone the repository
+## Quick Start
 
 ```bash
+# Clone the repository
 git clone <repository-url>
 cd LifeQueue
-```
 
-### Install dependencies
-
-Install frontend dependencies:
-
-```bash
+# Install frontend dependencies
 cd frontend
 npm install
-```
 
-Install backend dependencies:
-
-```bash
-cd ../backend
-npm install
-```
-
-### Start the backend
-
-```bash
-cd backend
+# Start frontend
 npm run dev
 ```
 
-### Start the frontend
-
-Open another terminal:
+In a separate terminal:
 
 ```bash
-cd frontend
+# Start backend
+cd LifeQueue/backend
+npm install
 npm run dev
 ```
 
-The application can then be accessed through the URL provided by Vite.
+Open the frontend URL shown by Vite (typically `http://localhost:5173`).
 
----
+### Basic Workflow
 
-## Environment Configuration
-
-Create the required environment files according to the project configuration.
-
-Example:
-
-```text
-backend/.env
-```
-
-Environment variables may include:
-
-```text
-PORT=5000
-DATABASE_PATH=./database/lifequeue.db
-```
-
-Do not commit sensitive credentials or environment secrets to Git.
-
----
-
-## Usage Flow
-
-```text
-Create Task
-     │
-     ▼
-Enter Task Details
-     │
-     ▼
-Calculate Priority
-     │
-     ▼
-Analyze Dependencies
-     │
-     ▼
-Generate Priority Score
-     │
-     ▼
-Add to Priority Queue
-     │
-     ▼
-Recommend Next Task
-     │
-     ▼
-Start Focus Mode
-     │
-     ▼
-Complete Task
-     │
-     ▼
-Update Analytics
-```
-
----
+1. Create tasks with deadlines, effort, impact, consequence, and dependencies.
+2. LifeQueue calculates a **0–100 priority score** for each task.
+3. Check the **Dashboard** to see the recommended next task.
+4. Use **Focus Mode** to work on a selected task.
+5. Use **"I Have X Minutes"** to optimize a limited work session.
+6. Check **Analytics** to track productivity and task completion.
 
 ## Example Priority Explanation
 
