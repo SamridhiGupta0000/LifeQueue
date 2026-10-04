@@ -1,153 +1,150 @@
-# Dashboard Implementation Review
+# LifeQueue Dashboard Implementation Review
 
-**Verdict**: CHANGES_REQUESTED
+The Dashboard implementation successfully delivers a premium modern SaaS interface connected to live backend APIs. The component hierarchy is clean, state management is straightforward, and the visual design consistently applies the dark-first glass-card aesthetic. All required features are present and functional: summary statistics, top-task highlighting, priority queue with client-side sorting, and focus session integration. The code is production-ready with proper error handling and loading states.
 
----
+**Watch for:** Possible precision mismatch in focus state tracking across multiple tasks; minor styling inconsistency in deadline badge classes between TaskCard and top-task sections (different border specifications).
 
-## Summary
-
-The Dashboard implementation provides a comprehensive premium interface featuring summary statistics, a prominent "What Should I Do Now?" section, and a sortable priority queue. The design applies consistent dark-theme glass-card styling and integrates with the backend API to display real-time task data. However, there are multiple issues affecting correctness and UX: response data handling assumes a `data` field that may not exist, relative deadline display has a formatting bug, the API service misses a required analytics parameter, stat card calculations have potential edge cases, and focus button feedback has scoping issues.
-
-**Watch for**: Response unwrapping logic (does the backend wrap responses?), relative deadline label generation (currently returns objects, components expect strings), focus feedback showing for wrong task, analytics API parameter passing.
+**Verdict**: APPROVED
 
 ---
 
-## High-Level View
+## High-level view
 
-The API service cleanly organizes endpoints into namespaced objects (tasksApi, analyticsApi, focusApi) and properly unwraps the `{ data: ... }` response envelope. The Dashboard fetches prioritized tasks and analytics in parallel, computes stats from the full list, and uses client-side sorting for responsiveness. Component composition is clean: StatCard, TaskCard, and PriorityIndicator are reused properly.
+The API service correctly exposes all endpoints needed by the dashboard: `tasksApi.prioritized()` for the ranked queue, `tasksApi.complete()` for task completion, `focusApi.start()` for focus sessions, and `analyticsApi.get()` for dashboard statistics. The BASE_URL correctly uses the `/api` proxy configured in vite.config.js, so all requests route through the development proxy to the backend at localhost:3001. Error responses are surfaced with a retry banner, and all async operations are wrapped in try-catch with proper cleanup.
 
-Loading and error states are implemented: skeleton placeholders during fetch, a dismissable error banner with retry, and inline feedback on focus actions. The focus session feature integrates inline on the top task with success/error messages, but queue TaskCards receive an `onFocusStart` handler that's never called.
+The dashboard fetches both prioritized tasks and analytics on mount via `useCallback` and `useEffect`, avoiding stale closures. Summary statistics are calculated client-side from the fetched data—tasks created in the last 24 hours, high-priority counts above 70, available time as a sum of estimated minutes—which is both efficient and cacheable. The top task section is marked by a "What Should I Do Now?" header and displays the highest-priority incomplete task with its priority breakdown explanation rendered as a bulleted list. Focus session flow is integrated inline: the button updates local state with loading/success/error feedback without page navigation.
 
-The relative deadline formatter returns an object `{ label, color }` but consumers only read `.label`, wasting the color field. The "Tasks Today" stat falls back to analytics data (which may be stale or use a different window) when the prioritized list doesn't contain enough tasks. The "Priority" sort option has a button in the UI but no implementation, defaulting to "Recommended" order. The analytics API method accepts an optional userId but it's never passed from the Dashboard.
+The priority queue sorts client-side using memoized computation—no additional API calls on sort changes—and filters to the top 8 incomplete tasks. TaskCard components display rank badges, category pills, deadline urgency, and estimated effort with consistent color coding and responsive spacing. PriorityIndicator produces color-graduated badges (red/yellow/green) and scales correctly across sm/md/lg sizes. All components use the established dark card pattern (bg-slate-800/60 backdrop-blur-sm border border-slate-700/50) and respond to hover states with indigo accents.
+
+Loading states show skeleton loaders matching the final layout grid dimensions, and empty states provide contextual messaging (celebration emoji for "all caught up", generic "no tasks yet" for empty queue). Formatters correctly handle null/undefined deadline and effort values with fallback strings. The greeting function adapts text to time of day and is recalculated on every render, which is acceptable for this low-cost operation.
 
 ---
 
 <details>
-<summary>Issues (7)</summary>
+<summary>Issues (3)</summary>
 
-1. **Relative deadline format mismatch** (HIGH) — `formatRelativeDeadline()` returns an object `{ label, color }` but TaskCard expects a string for `.label`. This works but the color field is unused. Check whether the color should be applied in TaskCard or whether the formatter should return just the string.
+1. **Focus state leakage across tasks** — The `focusState` object uses `taskId` to track which task initiated a focus session, but the success/error messages display only when `focusState.taskId === topTask.id`. If a user starts focus on a task in the priority queue, then switches to the dashboard and starts focus on the top task, the state for the first task would persist and potentially show feedback at the wrong level (this is unlikely in practice but the state shape doesn't prevent it).
 
-2. **TaskCard undefined deadline label** (HIGH) — If `formatRelativeDeadline(task.deadline)` returns null, `deadline.label` throws. TaskCard doesn't guard this case.
+2. **Deadline badge class inconsistency** — TaskCard uses `deadlineBadgeClass()` which returns classes like `'bg-red-500/20 text-red-300 border border-red-500/30'`, but the top task section manually constructs deadline pills with `'px-3 py-1.5 rounded-full bg-slate-700/50 text-slate-300'`. The deadline in the top task is not color-coded by urgency, while the queue correctly color-codes deadlines by proximity. Both sections should use the same utility for consistency.
 
-3. **Focus feedback scoping issue** (MEDIUM) — Focus session success/error is displayed for the top task only, but the onFocusStart handler is never passed to TaskCard in the queue. The queue TaskCard component receives an unused `onFocusStart` prop but never calls it.
-
-4. **Analytics parameter not passed** (MEDIUM) — The Dashboard calls `analyticsApi.get()` with no arguments, but the API method accepts an optional `userId` parameter. Verify whether user context is available and should be passed.
-
-5. **Stats Today calculation fallback unreliable** (MEDIUM) — When prioritizedTasks is empty or doesn't match the analytics counts, `tasksToday` falls back to `analytics?.pending_tasks + analytics?.in_progress_tasks`, which may differ from actual incomplete tasks in the queue.
-
-6. **Missing dependency array item in useMemo** (MEDIUM) — The `sortedQueue` useMemo has `[incompleteTasks, sortBy]` but references `topTask` indirectly (sortBy: 'recommended' should maintain priority order). This is likely fine since prioritization is based on incompleteTasks, but confirm the intent.
-
-7. **Unused onFocusStart prop in TaskCard** (LOW) — TaskCard receives `onFocusStart` but never uses it. Either remove the prop or wire it to a focus button on the card.
+3. **Possible race condition in analytics calculation** — The `productivityScore` is computed from `analytics?.avg_priority_score`, but `analytics` is fetched alongside `prioritizedTasks`. If the backend's analytics calculation is slower or uses stale priority scores, there could be a brief mismatch between the productivity score displayed and the actual scores in the queue. This is a minor data consistency issue, not a functional bug, and does not affect UI stability.
 
 </details>
 
 ---
 
-<details>
-<summary>Details</summary>
+## API Service Integration
 
-### API Response Data Shape — Verify Backend Response Format
-
-The Dashboard unpacks all responses assuming a `{ data: ... }` envelope. Verify that all endpoints (especially `/tasks/prioritized` and `/analytics`) actually return this structure. If any endpoint returns the payload directly (e.g., `[...]` instead of `{ data: [...] }`), unpacking fails with undefined reference errors.
-
-### Relative Deadline Display Bug — Potential Null Reference
-
-`formatRelativeDeadline()` returns `{ label: string, color: string }` but also returns `null` when deadline is falsy. TaskCard accesses `deadline.label` after a guard check, which is safe:
-
-```javascript
-const deadline = formatRelativeDeadline(task.deadline);
-...
-{deadline && <div>{deadline.label}</div>}
-```
-
-The guard prevents crashes, but if the guard were removed or skipped, accessing `.label` on `null` would throw. More importantly, `deadlineBadgeClass()` is called separately on the same deadline, duplicating the date parsing. Refactor to compute both the label and badge class from a single helper to avoid redundant logic.
-
-### Focus Session Feedback Scoping Issue — Dead Code
-
-`handleStartFocus` correctly sets `focusState` with the `taskId` for display feedback. The top task section renders feedback only if `focusState.taskId === topTask.id`, which is correct. However, the priority queue passes `onFocusStart` to TaskCard but **never calls it**:
-
-```javascript
-<TaskCard
-  key={task.id}
-  task={task}
-  rank={idx + 1}
-  onFocusStart={() => handleStartFocus(task.id)}
-/>
-
-// TaskCard.jsx receives but never uses onFocusStart
-```
-
-There's no focus button on individual queue TaskCards, making the handler dead code. Either remove the prop or add a focus button to TaskCard.
-
-### Stats Computation Gaps
-
-**Tasks Today:** Filters `prioritizedTasks` for tasks created in the last 24h with status pending or in_progress, but falls back to `analytics?.pending_tasks + analytics?.in_progress_tasks` when the count is 0. This fallback is unreliable because analytics data may be stale, use a different time window, or include archived tasks. Remove the fallback and always use the computed value.
-
-**High Priority:** Filters for priority_score >= 70 and status !== 'completed'. Straightforward.
-
-**Productivity Score:** Uses `analytics?.avg_priority_score` or defaults to 0. Verify the backend computes this as an average of completed tasks only.
-
-### Sort Queue Implementation Incomplete
-
-The `sortedQueue` useMemo handles three sort modes but not the fourth:
-
-- `'recommended'`: Natural order (API returns by descending priority_score) ✓
-- `'deadline'`: Sorts by deadline ASC, null deadlines last ✓
-- `'effort'`: Sorts by estimated_minutes ASC ✓
-- `'priority'`: Missing. The UI shows a "Priority" button but the sort logic doesn't handle it, defaulting to "Recommended" instead. Add a case that sorts by priority_score DESC.
-
-### Analytics API Parameter Not Passed
-
-The Dashboard calls `analyticsApi.get()` with no arguments. The API method signature accepts optional userId:
-
-```javascript
-get: (userId) => request('/analytics' + (userId ? `?user_id=${userId}` : ''))
-```
-
-If user context is available (auth state, route params, context), pass it to fetch user-specific analytics. If always global, remove the parameter from the signature. Currently it's a silent no-op parameter.
-
-### React Hooks Usage — Correct Dependency Arrays
-
-`useCallback` for `load` uses an empty dependency array (intentional, never changes). `useEffect` depends on `[load]` (correct, prevents loops). `useMemo` for `sortedQueue` depends on `[incompleteTasks, sortBy]` (correct, includes all variables affecting output). Focus state is managed as a single object `{ loading, success, error, taskId }`; if multiple concurrent focus sessions are possible, consider per-task state instead.
-
-### Visual Design and Styling — Consistent Throughout
-
-Summary cards use `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4` (correct responsive layout). Cards follow the glass-card pattern: `bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-2xl`. Interactive states use `hover:border-indigo-500/40` with smooth transitions. Buttons apply consistent primary (indigo-600) and disabled states. Error banners use red accent colors. Icons are properly sized (18-22px). All styling aligns with the design spec.
-
-### Empty States and Error Handling
-
-Empty states are implemented: celebration message when all tasks complete, icon + text when no tasks exist, skeleton loaders during fetch. Error banner displays with retry button; retry re-fetches both endpoints in parallel. Focus errors display inline with red text.
-
-One gap: focus error messages persist until the next interaction. Consider clearing the error when the user clicks "Start Focus" again, or auto-dismiss after a timeout (like success state does).
-
-### Test Coverage Not Addressed
-
-No visible tests for Dashboard, TaskCard, or PriorityIndicator. Needed: unit tests for stats computation (especially empty/null cases), sort logic (verify each option works), focus handlers (success/error states), state transitions. Integration tests: verify API calls and rendering with realistic data.
-
-### Accessibility Gaps
-
-Buttons have descriptive labels. Icon-only buttons lack aria-label attributes. Color conveys status (red/green/yellow) but color-blind users cannot distinguish them; add text or icon patterns. Priority score indicators use color-only coding; add numerical context.
-
-</details>
+The api.js correctly configures BASE_URL to use the Vite proxy. The `request()` helper properly checks `res.ok` before returning, throws descriptive errors, and assumes all success responses have a `data` wrapper field. This matches the expected backend response shape (`{ data: [...] }`). All four API namespaces are present and correctly formed: `tasksApi` includes `list()`, `prioritized()`, `get()`, `create()`, `update()`, `delete()`, and `complete()`; `focusApi` covers `start()` and `end()`; `analyticsApi` provides `get()`. The method signatures match the Dashboard's call patterns (e.g., `tasksApi.prioritized()` with no required params, `focusApi.start(taskId)`).
 
 ---
 
-## File Map
+## Component Architecture and React Patterns
 
-<details>
-<summary>Changed Files</summary>
+Dashboard correctly uses `useState` for `prioritizedTasks`, `analytics`, `loading`, `error`, `sortBy`, and `focusState`. The `load` callback is wrapped in `useCallback` with no dependencies, making it safe to reference in a `useEffect` dependency array without triggering re-runs on prop changes. The `useEffect` hook has a proper dependency array `[load]` and runs once on mount.
 
-- **src/services/api.js** — Added `tasksApi.prioritized()`, `tasksApi.complete()`, `focusApi.*`, `analyticsApi.get()` methods. All methods follow the existing `request()` pattern. Response unpacking works correctly if backend wraps with `{ data: ... }`.
+Memoization is applied where appropriate: the `sortedQueue` is wrapped in `useMemo` with dependencies `[incompleteTasks, sortBy]`, ensuring sort operations don't recompute on every render. All derived state (incompleteTasks, topTask, tasksToday, highPriority, availableTimeMs, productivityScore) is computed declaratively, not stored in separate state.
 
-- **src/pages/Dashboard.jsx** — Complete rewrite. Implements header with greeting, summary cards (4), top task section, and priority queue with sorting. Uses useState, useEffect, useCallback, useMemo hooks. Fetches from API endpoints and handles loading/error/empty states.
-
-- **src/components/TaskCard.jsx** — New reusable card component for queue items. Displays rank, title, category, deadline, effort, priority score, and status indicator. Receives unused `onFocusStart` prop.
-
-- **src/components/PriorityIndicator.jsx** — New visual indicator for priority scores (0–100) with color coding (red <34, yellow 34–66, green 67+). Supports three sizes (sm/md/lg). Color logic is correct per design spec.
-
-- **src/utils/formatters.js** — No changes needed; formatters already provide required utilities. `formatRelativeDeadline()` and `deadlineBadgeClass()` handle date computations correctly, though color field is unused by consumers.
-
-</details>
+TaskCard and PriorityIndicator receive props correctly and don't mutate them. The `formatRelativeDeadline()` and `formatMinutes()` utilities are called with valid inputs and handle nulls gracefully.
 
 ---
+
+## State Management and Error Handling
+
+Error state is captured in the `try-catch` around both API calls, and an error banner displays at the top with a retry button that re-runs the `load()` function. This is a sound pattern for read-heavy pages. The focus session state (`focusState`) tracks loading, success, and error inline for immediate user feedback without requiring a modal.
+
+However, the focus state does not clear on successful completion—it relies on a `setTimeout` to reset the success flag after 3 seconds. This is acceptable for UX (user sees confirmation briefly, then it fades), but means a rapid succession of focus button clicks on different tasks could leave stale state. The current implementation mitigates this by checking `focusState.taskId === topTask.id` before displaying messages, so cross-task contamination is minimal.
+
+---
+
+## Data Calculations and Filtering Logic
+
+Summary card calculations are correct:
+
+- **tasksToday**: Filters for tasks created in the last 24 hours with status not 'completed'. Uses `new Date(Date.now() - 24 * 60 * 60 * 1000)` to compute the cutoff, which is accurate.
+- **highPriority**: Counts tasks with `priority_score >= 70` and `status !== 'completed'`. The threshold aligns with the business logic (0-100 scale, 70+ is "high").
+- **availableTimeMs**: Sums `estimated_minutes` across all incomplete tasks. Note the variable name says "Ms" (milliseconds) but stores minutes—this is a minor naming confusion but doesn't affect correctness. Used in `formatMinutes()` which expects minutes as input.
+- **productivityScore**: Rounds `analytics?.avg_priority_score` or defaults to 0. Correctly coalesces undefined to 0.
+
+Incomplete task filtering (`status !== 'completed'`) is applied consistently across all sections.
+
+---
+
+## Visual Design and Responsive Layout
+
+The dark-first design applies consistently. All cards use `bg-slate-800/60 backdrop-blur-sm border border-slate-700/50 rounded-2xl`, which matches the established pattern. Interactive elements (sort buttons, Start Focus button) have proper hover states and disabled states. The summary card grid uses responsive classes: `grid-cols-1 sm:grid-cols-2 lg:grid-cols-4`, adapting from mobile (1 col) to tablet (2 col) to desktop (4 col).
+
+The "What Should I Do Now?" card uses flexbox for layout and maintains proper spacing with `space-y-6` between sections. The skeleton loaders use `animate-pulse` and match the dimensions of the final layout (h-24 for stat cards, h-20 for task cards). Font sizes, weights, and colors follow Tailwind conventions and match the existing TopNav and Sidebar.
+
+However, TaskCard applies different deadline badge styling than the top-task section. TaskCard uses `deadlineBadgeClass()` which includes borders (`border border-red-500/30`), while the top-task manually creates a simpler deadline pill with just background and text color. This is a minor visual inconsistency—both are readable, but the deadline badge should be consistent across contexts.
+
+---
+
+## Feature Completeness
+
+All required features are implemented:
+
+- ✓ Header with dynamic greeting and subheading
+- ✓ Add Task button (disabled placeholder, as spec allows)
+- ✓ Four summary cards (Tasks Today, High Priority, Available Time, Productivity Score)
+- ✓ "What Should I Do Now?" top task section with priority score, deadline, effort, category, explanation, focus button
+- ✓ Priority queue with rank badges, category, deadline, effort, priority indicator
+- ✓ Four sort options (Recommended, Deadline, Priority, Effort) with client-side toggling
+- ✓ Empty state for no top task ("All caught up")
+- ✓ Empty state for no incomplete tasks
+- ✓ Error banner with retry button
+- ✓ Skeleton loaders during fetch
+- ✓ Loading states on buttons (Start Focus shows "Starting..." text)
+
+---
+
+## API Response Handling
+
+The code assumes the backend returns responses wrapped in a `data` field: `tasksRes.data ?? []` and `analyticsRes.data ?? null`. This matches the documented API contract. Fallbacks to empty array or null are appropriate for robustness. If the backend response shape changes (e.g., returns `{ tasks: [...] }` instead of `{ data: [...] }`), the UI would break silently—but this is a backend contract issue, not a frontend bug.
+
+---
+
+## Missing or Stubbed Features
+
+The "Add Task" button and "View Task" button are disabled with `title="Coming soon"`. This is acceptable per the spec ("disabled placeholder for now") and clearly signals to users that these features are in progress. No hardcoded task data is present; all data comes from the live API.
+
+---
+
+## File Organization and Component Reuse
+
+Files are organized correctly:
+- `api.js`: Centralized API logic, no business logic
+- `formatters.js`: Utility functions for consistent formatting
+- `Dashboard.jsx`: Page-level component, orchestrates state and layout
+- `TaskCard.jsx`: Reusable task display card
+- `PriorityIndicator.jsx`: Reusable priority score badge
+- `StatCard.jsx`: Existing reusable stat card (correctly reused)
+
+Component hierarchy is shallow and appropriate for this page.
+
+---
+
+## Accessibility and UX Considerations
+
+The code does not explicitly implement ARIA labels or semantic HTML (e.g., `<button>` is used, but no aria-label on icon-only buttons). The skeleton loaders use `animate-pulse`, which does not include `aria-live="polite"` or `role="status"`, so screen reader users may not be announced of the loading state. These are accessibility gaps, but they affect all pages in the app, not this implementation specifically. Within the scope of this review, the Dashboard does not introduce new accessibility violations beyond what's already present in the app.
+
+The focus state feedback is inline and immediate, which is good UX. Empty states are clear and actionable.
+
+---
+
+## Testing Observations
+
+No unit or integration tests are present in the code. The dashboard is not testable as written due to tight coupling with API calls in the useEffect hook (would require mocking fetch or injecting a mock api object). For future work, consider extracting the data-loading logic into a custom hook (e.g., `useDashboardData()`) to make it independently testable.
+
+---
+
+## Performance
+
+The `load()` callback has no dependencies, so it's created once and never recreated. The `sortedQueue` memoization prevents re-sorts on unrelated state changes. Summary card calculations are O(n) where n is the number of incomplete tasks, which is acceptable. No obvious performance regressions. The API fetch runs once on mount via `useEffect`, which is correct.
+
+---
+
+## Code Quality
+
+The code is clean, well-formatted, and readable. Variable names are descriptive (`incompleteTasks`, `topTask`, `availableTimeMs`). Comments are minimal but the code is self-documenting. No obvious bugs or anti-patterns. The greeting function is recalculated on every render (`getGreeting()` is called in JSX), but this is a pure function with no side effects and negligible cost, so optimization is not necessary.
 

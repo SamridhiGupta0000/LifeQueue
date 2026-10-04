@@ -44,13 +44,13 @@ export default function TaskDetailModal({
   const isDone = currentTask.status === 'done';
   const isComplete = currentTask.status === 'completed';
 
-  // Build score bars - map API field names
+  // Build score bars - use consistent API field names
   const scoreItems = [
     { label: 'Urgency', value: currentTask.urgency || 0 },
-    { label: 'Impact', value: currentTask.impact_score || (currentTask.impact ? currentTask.impact * 10 : 0) },
-    { label: 'Efficiency', value: currentTask.effort_efficiency || currentTask.effortEfficiency || 0 },
-    { label: 'Dependency', value: currentTask.dependency_impact || currentTask.dependencyImpact || 0 },
-    { label: 'Consequence', value: currentTask.consequence_score || (currentTask.consequence && typeof currentTask.consequence === 'number' ? currentTask.consequence * 10 : 0) },
+    { label: 'Impact', value: currentTask.impact || 0 },
+    { label: 'Efficiency', value: currentTask.effort_efficiency || 0 },
+    { label: 'Dependency', value: currentTask.dependency_impact || 0 },
+    { label: 'Consequence', value: currentTask.consequence || 0 },
   ];
 
   return (

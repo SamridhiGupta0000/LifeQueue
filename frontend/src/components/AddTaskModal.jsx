@@ -155,7 +155,8 @@ export default function AddTaskModal({
       resetForm();
       onClose();
     } catch (e) {
-      setErrors({ submit: e.message });
+      // Show error but keep form state so user can retry
+      setErrors({ submit: e.message || 'Failed to save task' });
     } finally {
       setLoading(false);
     }

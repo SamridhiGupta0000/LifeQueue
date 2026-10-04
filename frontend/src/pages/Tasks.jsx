@@ -69,11 +69,11 @@ export default function Tasks() {
     }
 
     // Filter by status
+    // Always exclude archived regardless of filter
+    result = result.filter((t) => t.status !== 'archived');
+    
     if (filterBy !== 'all') {
       result = result.filter((t) => t.status === filterBy);
-    } else {
-      // When showing all, exclude archived and done
-      result = result.filter((t) => t.status !== 'archived' && t.status !== 'done');
     }
 
     // Sort
@@ -110,29 +110,54 @@ export default function Tasks() {
 
   async function handleDelete(task) {
     if (!window.confirm('Delete this task?')) return;
+    
+    // Store original state for potential revert
+    const originalTasks = tasks;
+    
     try {
-      await tasksApi.delete(task.id);
+      // Optimistic update
       setTasks((prev) => prev.filter((t) => t.id !== task.id));
+      
+      // API call
+      await tasksApi.delete(task.id);
       setShowDetailModal(false);
     } catch (e) {
-      alert(e.message);
+      // Revert on failure
+      setTasks(originalTasks);
+      alert('Failed to delete task: ' + e.message);
     }
   }
 
   async function handleComplete(task) {
+    // Store original state for potential revert
+    const originalTasks = tasks;
+    const originalTask = tasks.find(t => t.id === task.id);
+    
     try {
+      // Optimistic update: toggle status
+      const newStatus = task.status === 'done' ? 'pending' : 'done';
+      setTasks((prev) =>
+        prev.map((t) => (t.id === task.id ? { ...t, status: newStatus } : t))
+      );
+      
+      // API call
       const res = await tasksApi.complete(task.id);
       const updatedTask = res.data;
+      
+      // Update with server response
       setTasks((prev) =>
         prev.map((t) => (t.id === task.id ? updatedTask : t))
       );
+      
       // Update selected task if viewing details
       if (selectedTaskId === task.id) {
         setSelectedTaskId(null);
         setShowDetailModal(false);
       }
     } catch (e) {
-      alert(e.message);
+      // Revert on failure
+      setTasks(originalTasks);
+      alert('Failed to update task: ' + e.message);
     }
   }
 
