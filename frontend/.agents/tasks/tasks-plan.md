@@ -1,29 +1,27 @@
 # Implementation Plan: Complete My Tasks Experience
 
-## Verification (2026-10-04)
+## Verification (2026-10-05)
 
 **Build Status:** ✅ PASS
 - Command: `cd e:\LifeQueue/frontend && npm run build`
-- Result: Build completed in 585ms, no errors
-- Output size: index-BnbK6-NK.js (311.57 kB gzipped 94.64 kB)
+- Result: Build completed in 685ms, no errors
+- Output size: index-ChD5GeT4.js (311.64 kB gzipped 94.67 kB)
 
-**Backend API Health:** ✅ PASS
-- Endpoint: `GET http://localhost:3001/api/health`
-- Status: 200 OK
-- Service: LifeQueue API v1
+**Review Findings Addressed:** ✅ ALL FIXED
+1. ✅ **Filter logic** — Fixed to properly show done tasks when 'Completed' filter is selected
+   - Changed filter: `status !== 'archived'` always, then `status === filterBy` when not 'all'
+   - Now 'Completed' button shows only done tasks as expected
+2. ✅ **Field name consistency** — Updated TaskDetailModal to use correct API field names
+   - Changed from fallback chains to direct snake_case: `effort_efficiency`, `dependency_impact`
+   - Verified against backend API response (taskController.js lines 329-332)
+3. ✅ **Error boundary on optimistic updates** — Added state rollback on API failure
+   - handleDelete/handleComplete now revert local state if API fails
+   - User gets clear error message and can retry
+   - Form preserves user input on error in AddTaskModal
 
-**API Smoke Tests:** ✅ ALL PASS
-- `GET /api/tasks`: Returns 14 tasks with priority scores
-- `GET /api/tasks/prioritized`: Returns tasks with urgency, effort_efficiency, dependency_impact, explanation array, rank
-- `POST /api/tasks`: Creates new task with auto-calculated priority_score (36.25 for test task)
-- `PUT /api/tasks/:id`: Updates task, recalculates priority (49.7 after impact increase to 8)
-- `POST /api/tasks/:id/complete`: Marks task as done
-- `DELETE /api/tasks/:id`: Soft deletes (archives) task
-
-**Task Data Structure Verified:**
-- Task object includes all required fields: id, title, description, category, deadline, estimated_minutes, impact, consequence, status, priority_score
-- Prioritized endpoint additionally returns: urgency, effort_efficiency, dependency_impact, explanation (string array), rank
-- Detail endpoint returns: dependencies array with dependent task objects
+**API Field Names Verified:**
+- Prioritized endpoint returns: urgency, impact, effort_efficiency (snake_case), dependency_impact (snake_case), consequence, explanation (array), rank
+- No longer assumes field name variations; uses consistent snake_case per API spec
 
 ## Overview
 Implement a polished My Tasks page with full CRUD functionality, including creation, editing, completion, and deletion of tasks. Connect directly to verified backend APIs. Include two modal components (AddTaskModal and TaskDetailModal) for task management and viewing priority score details.
