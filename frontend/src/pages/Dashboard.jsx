@@ -50,7 +50,7 @@ export default function Dashboard() {
     const created = new Date(t.created_at);
     const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
     return created >= dayAgo;
-  }).length || (analytics?.pending_tasks ?? 0) + (analytics?.in_progress_tasks ?? 0);
+  }).length;
 
   const highPriority = prioritizedTasks.filter(
     t => t.priority_score >= 70 && t.status !== 'completed'
@@ -69,6 +69,9 @@ export default function Dashboard() {
         if (!b.deadline) return -1;
         return new Date(a.deadline) - new Date(b.deadline);
       });
+    }
+    if (sortBy === 'priority') {
+      return [...list].sort((a, b) => (b.priority_score ?? 0) - (a.priority_score ?? 0));
     }
     if (sortBy === 'effort') {
       return [...list].sort((a, b) => (a.estimated_minutes || 0) - (b.estimated_minutes || 0));
@@ -277,7 +280,6 @@ export default function Dashboard() {
                 key={task.id}
                 task={task}
                 rank={idx + 1}
-                onFocusStart={() => handleStartFocus(task.id)}
               />
             ))}
           </div>

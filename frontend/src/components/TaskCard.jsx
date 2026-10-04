@@ -3,9 +3,8 @@
  */
 import PriorityIndicator from './PriorityIndicator';
 import { formatMinutes, formatRelativeDeadline, deadlineBadgeClass } from '../utils/formatters';
-import { AlertCircle } from 'lucide-react';
 
-export default function TaskCard({ task, rank, onFocusStart }) {
+export default function TaskCard({ task, rank }) {
   const deadline = formatRelativeDeadline(task.deadline);
   const statusDotColor = {
     'in_progress': 'bg-blue-400',
@@ -44,17 +43,17 @@ export default function TaskCard({ task, rank, onFocusStart }) {
 
       {/* Bottom row: deadline, effort, details */}
       <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-slate-400">
-        {deadline && (
+        {deadline ? (
           <div className={`px-2.5 py-1 rounded-full ${deadlineBadgeClass(task.deadline)}`}>
             {deadline.label}
           </div>
-        )}
+        ) : null}
 
-        {task.estimated_minutes && (
+        {task.estimated_minutes ? (
           <div className="px-2.5 py-1 rounded-full bg-slate-700/50 text-slate-300">
             {formatMinutes(task.estimated_minutes)}
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   );
